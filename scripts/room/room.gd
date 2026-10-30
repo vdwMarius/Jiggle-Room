@@ -181,7 +181,7 @@ func _apply_surfaces(settings: Dictionary) -> void:
 		mat.set_shader_parameter("use_texture", tex != null)
 		if tex:
 			mat.set_shader_parameter("tex", tex)
-		var shiny := key == "floor" and (pattern == RoomTheme.Pattern.PLANKS or pattern == RoomTheme.Pattern.TILES)
+		var shiny: bool = key == "floor" and (pattern == RoomTheme.Pattern.PLANKS or pattern == RoomTheme.Pattern.TILES)
 		mat.set_shader_parameter("roughness_value", 0.35 if shiny else 0.88)
 
 
