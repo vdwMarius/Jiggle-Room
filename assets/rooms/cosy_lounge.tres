@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="RoomTheme" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/room/room_theme.gd" id="1_theme"]
+
+[resource]
+script = ExtResource("1_theme")
+id = &"cosy_lounge"
+display_name = "Cosy Lounge"
+sort_order = 0
+unlock_rule = ""
+wall_color = Color(0.95, 0.86, 0.78, 1)
+wall_color_b = Color(0.91, 0.8, 0.72, 1)
+wall_pattern = 1
+floor_color = Color(0.62, 0.42, 0.3, 1)
+floor_color_b = Color(0.52, 0.34, 0.24, 1)
+floor_pattern = 3
+ceiling_color = Color(0.98, 0.95, 0.9, 1)
+light_color = Color(1, 0.9, 0.78, 1)
+light_energy = 1.0
+ambient_color = Color(0.7, 0.62, 0.6, 1)
+ambient_energy = 0.6
+props = 1

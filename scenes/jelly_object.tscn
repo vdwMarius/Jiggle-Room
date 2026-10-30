@@ -1,0 +1,15 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/jelly/jelly_object.gd" id="1_jelly"]
+
+[node name="JellyObject" type="RigidBody3D" groups=["jellies"]]
+collision_layer = 2
+collision_mask = 7
+continuous_cd = true
+contact_monitor = true
+max_contacts_reported = 6
+script = ExtResource("1_jelly")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+
+[node name="Shape" type="CollisionShape3D" parent="."]

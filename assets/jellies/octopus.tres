@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="JellyData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/jelly/jelly_data.gd" id="1_data"]
+
+[resource]
+script = ExtResource("1_data")
+id = &"octopus"
+display_name = "Octopus"
+sort_order = 5
+unlock_rule = "pokes:120"
+procedural_shape = 6
+base_radius = 0.55
+collision = 0
+color = Color(0.95, 0.45, 0.85, 1)
+lag_amount = 2.0
+damping = 0.16
+wobble_frequency = 2.6
+stiffness = 0.3
+max_deformation = 0.3
+core_floppiness = 0.15

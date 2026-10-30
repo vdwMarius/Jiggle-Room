@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="JellyData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/jelly/jelly_data.gd" id="1_data"]
+
+[resource]
+script = ExtResource("1_data")
+id = &"blob"
+display_name = "Blob"
+sort_order = 0
+unlock_rule = ""
+procedural_shape = 1
+base_radius = 0.45
+collision = 0

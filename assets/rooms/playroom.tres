@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="RoomTheme" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/room/room_theme.gd" id="1_theme"]
+
+[resource]
+script = ExtResource("1_theme")
+id = &"playroom"
+display_name = "Playroom"
+sort_order = 1
+unlock_rule = ""
+wall_color = Color(0.75, 0.88, 0.98, 1)
+wall_color_b = Color(0.98, 0.98, 1, 1)
+wall_pattern = 7
+floor_color = Color(0.98, 0.95, 0.85, 1)
+floor_color_b = Color(0.95, 0.6, 0.65, 1)
+floor_pattern = 2
+ceiling_color = Color(1, 1, 1, 1)
+light_color = Color(1, 1, 0.95, 1)
+light_energy = 1.1
+ambient_color = Color(0.75, 0.75, 0.82, 1)
+ambient_energy = 0.7
+props = 4

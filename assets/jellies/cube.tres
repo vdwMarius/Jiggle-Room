@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="JellyData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/jelly/jelly_data.gd" id="1_data"]
+
+[resource]
+script = ExtResource("1_data")
+id = &"cube"
+display_name = "Cube"
+sort_order = 1
+unlock_rule = ""
+procedural_shape = 2
+base_radius = 0.42
+collision = 2
+color = Color(1, 0.45, 0.55, 1)
+stiffness = 0.55
+wobble_frequency = 3.6
+mass = 1.2

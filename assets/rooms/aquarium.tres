@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="RoomTheme" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/room/room_theme.gd" id="1_theme"]
+
+[resource]
+script = ExtResource("1_theme")
+id = &"aquarium"
+display_name = "Aquarium"
+sort_order = 2
+unlock_rule = "play_minutes:5"
+wall_color = Color(0.12, 0.42, 0.6, 1)
+wall_color_b = Color(0.5, 0.85, 0.95, 1)
+wall_pattern = 4
+floor_color = Color(0.85, 0.78, 0.6, 1)
+floor_color_b = Color(0.75, 0.68, 0.5, 1)
+floor_pattern = 4
+ceiling_color = Color(0.2, 0.5, 0.7, 1)
+light_color = Color(0.65, 0.9, 1, 1)
+light_energy = 0.9
+ambient_color = Color(0.3, 0.55, 0.7, 1)
+ambient_energy = 0.8
+glow = true
+props = 2

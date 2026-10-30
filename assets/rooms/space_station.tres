@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="RoomTheme" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/room/room_theme.gd" id="1_theme"]
+
+[resource]
+script = ExtResource("1_theme")
+id = &"space_station"
+display_name = "Space Station"
+sort_order = 3
+unlock_rule = "spawns:20"
+wall_color = Color(0.22, 0.24, 0.3, 1)
+wall_color_b = Color(0.55, 0.58, 0.66, 1)
+wall_pattern = 5
+floor_color = Color(0.3, 0.32, 0.38, 1)
+floor_color_b = Color(0.6, 0.62, 0.7, 1)
+floor_pattern = 5
+ceiling_color = Color(0.08, 0.08, 0.15, 1)
+light_color = Color(0.8, 0.85, 1, 1)
+light_energy = 0.8
+ambient_color = Color(0.3, 0.3, 0.45, 1)
+ambient_energy = 0.5
+glow = true
+props = 3

@@ -1,0 +1,58 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Jiggle Room"
+config/description="A relaxing, tactile jelly-physics toy."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "Mobile")
+boot_splash/bg_color=Color(0.98, 0.9, 0.93, 1)
+config/icon="res://icon.svg"
+
+[autoload]
+
+GameState="*res://scripts/autoload/game_state.gd"
+Feedback="*res://scripts/autoload/feedback.gd"
+AdsService="*res://scripts/autoload/ads_service.gd"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=6
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+sensors/enable_accelerometer=true
+sensors/enable_gravity=true
+
+[layer_names]
+
+3d_physics/layer_1="room"
+3d_physics/layer_2="jelly"
+3d_physics/layer_3="props"
+
+[physics]
+
+common/physics_ticks_per_second=60
+common/max_physics_steps_per_frame=4
+3d/default_gravity=9.8
+3d/sleep_threshold_linear=0.05
+
+[rendering]
+
+renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=1
+environment/defaults/default_clear_color=Color(0.1, 0.1, 0.14, 1)
