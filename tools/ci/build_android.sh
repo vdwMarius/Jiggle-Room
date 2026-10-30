@@ -159,7 +159,8 @@ BT="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
 "$BT/aapt" dump badging "$BUILD/JiggleRoom.apk" | grep -E "^package:|sdkVersion|native-code" || true
 "$BT/aapt" dump permissions "$BUILD/JiggleRoom.apk" | grep -q "android.permission.VIBRATE" \
   || die "VIBRATE permission missing from APK"
-unzip -l "$BUILD/JiggleRoom.apk" | grep -q "assets/" || die "APK has no packed assets"
+# Consume the full listing: grep -q can make unzip exit with SIGPIPE under pipefail.
+unzip -l "$BUILD/JiggleRoom.apk" | grep "assets/" >/dev/null || die "APK has no packed assets"
 
 ls -lh "$BUILD/JiggleRoom.apk"
 log "SUCCESS: $BUILD/JiggleRoom.apk"
