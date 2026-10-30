@@ -34,6 +34,9 @@ var _ang_accel := Vector3.ZERO
 var _mesh_aabb := AABB()
 var _pending_impacts: Array = []   # [world_normal, speed] gathered in physics
 var _impact_cooldown := 0.0
+var _up_world := Vector3.UP
+var _grounded := false
+var _grounded_steps := 0
 
 
 func _ready() -> void:
@@ -162,7 +165,10 @@ func poke(world_point: Vector3, world_normal: Vector3, strength: float = 1.0) ->
 	var local := _to_mesh_local(world_point)
 	springs.add_ripple(local, data.ripple_amplitude * _mesh_radius * strength * lerpf(1.4, 0.6, data.stiffness))
 	# A poke also dents the surface briefly: reuse the impact spring.
-	_kick_impact(_dir_to_mesh_local(world_normal), 0.05 * strength)
+	_kick_impact(_dir_to_mesh_local(world_normal), 0.07 * strength)
+	# Pushing the side makes the top sway away, then wobble back.
+	var softness := lerpf(1.5, 0.6, data.stiffness)
+	springs.add_sway(_dir_to_mesh_local(-world_normal) * 1.3 * strength * softness * data.sway_amount)
 	apply_impulse(-world_normal * 0.6 * strength * mass, world_point - global_position)
 	sleeping = false
 
@@ -186,7 +192,9 @@ func update_grab(world_pull: Vector3) -> void:
 func end_grab() -> void:
 	held = false
 	springs.grabbing = false
-	# The stored pull snaps back with the normal (underdamped) wobble.
+	# The stored pull snaps back with the normal (underdamped) wobble, and the
+	# whole body sways after it for a satisfying "thwap".
+	springs.add_sway(-springs.grab / maxf(springs.body_height, 0.01) * 5.0 * data.sway_amount)
 
 
 ## Ripple + impulse used by shake and merges.
@@ -194,6 +202,7 @@ func jolt(world_impulse: Vector3) -> void:
 	apply_central_impulse(world_impulse * mass)
 	var dir := world_impulse.normalized() if world_impulse.length() > 0.001 else Vector3.UP
 	_kick_impact(_dir_to_mesh_local(-dir), clampf(world_impulse.length() * 0.03, 0.02, data.max_deformation))
+	springs.add_sway(_dir_to_mesh_local(dir) * clampf(world_impulse.length() * 0.25, 0.1, 1.2) * data.sway_amount)
 	sleeping = false
 
 
@@ -205,7 +214,14 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		_accel = (state.linear_velocity - _prev_velocity) / dt
 		_ang_accel = (state.angular_velocity - _prev_ang_velocity) / dt
 
+	if state.total_gravity.length_squared() > 0.01:
+		_up_world = -state.total_gravity.normalized()
+	var grounded_now := false
 	for i in state.get_contact_count():
+		# A contact below the centre (relative to gravity) means we're resting on something.
+		var cp := state.get_contact_local_position(i)
+		if (cp - state.transform.origin).dot(_up_world) < -world_radius() * 0.2:
+			grounded_now = true
 		var n := state.get_contact_local_normal(i)
 		# Orient the normal so it opposes the incoming motion (wall -> jelly).
 		if n.dot(_prev_velocity) > 0.0:
@@ -225,6 +241,10 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		# Cancel gravity and most motion: the jelly clings, then slowly lets go.
 		state.linear_velocity *= 0.85
 		state.apply_central_force(-state.total_gravity * mass * clampf(stick_timer / 0.6, 0.0, 1.0))
+
+	# Debounce so a bouncing jelly doesn't flicker between sagged and not.
+	_grounded_steps = clampi(_grounded_steps + (1 if grounded_now else -1), 0, 6)
+	_grounded = _grounded_steps >= 3
 
 	_prev_velocity = state.linear_velocity
 	_prev_ang_velocity = state.angular_velocity
@@ -260,6 +280,7 @@ func _process(delta: float) -> void:
 	var local_ang := _dir_to_mesh_local(_ang_accel) * minf(_ang_accel.length(), 200.0)
 	if held:
 		local_acc *= 0.5
+	_update_ground_frame()
 	springs.update(delta, local_acc, local_ang, local_vel, data)
 	springs.apply_to(_material, _mesh_radius)
 
@@ -275,6 +296,21 @@ func _kick_impact(local_normal: Vector3, amount: float) -> void:
 	var centre := _mesh_aabb.get_center()
 	var support := absf(n.x) * half.x + absf(n.y) * half.y + absf(n.z) * half.z
 	springs.impact_anchor = n * (centre.dot(n) - support)
+
+
+## Feeds the shader's ground frame: which way is up for this jelly right now,
+## where its base is, and how much it should sag under its own weight.
+func _update_ground_frame() -> void:
+	var up := _dir_to_mesh_local(_up_world)
+	if up == Vector3.ZERO:
+		return
+	var half := _mesh_aabb.size * 0.5
+	var support := absf(up.x) * half.x + absf(up.y) * half.y + absf(up.z) * half.z
+	springs.ground_up = up
+	springs.ground_anchor = up * (_mesh_aabb.get_center().dot(up) - support)
+	springs.body_height = maxf(support * 2.0, 0.01)
+	var softness := lerpf(1.4, 0.6, data.stiffness)
+	springs.sag_target = data.sag_amount * softness if (_grounded and not held) else 0.0
 
 
 func _to_mesh_local(world_point: Vector3) -> Vector3:

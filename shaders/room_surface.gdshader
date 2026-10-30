@@ -6,7 +6,7 @@ render_mode diffuse_burley, specular_schlick_ggx;
 
 uniform vec4 color_a : source_color = vec4(0.9, 0.85, 0.8, 1.0);
 uniform vec4 color_b : source_color = vec4(0.8, 0.75, 0.7, 1.0);
-uniform int pattern = 0; // matches RoomTheme.Pattern
+uniform int pattern = 0; // matches RoomTheme.Pattern (0-9)
 uniform float pattern_scale = 1.0;
 uniform bool use_texture = false;
 uniform sampler2D tex : source_color, filter_linear_mipmap, repeat_enable;
@@ -62,6 +62,12 @@ void fragment() {
 	} else if (pattern == 7) { // polka dots
 		vec2 f = fract(uv * 3.0) - 0.5;
 		m = smoothstep(0.2, 0.18, length(f));
+	} else if (pattern == 8) { // kitchen tiles with grout
+		vec2 f = fract(uv * 2.5);
+		float grout = 1.0 - step(0.04, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
+		m = mod(floor(uv.x * 2.5) + floor(uv.y * 2.5), 2.0) * 0.6 + grout * 0.4;
+	} else if (pattern == 9) { // soft carpet speckle
+		m = hash12(floor(uv * 90.0)) * 0.35 + hash12(floor(uv * 13.0)) * 0.15;
 	}
 	vec3 col = mix(color_a.rgb, color_b.rgb, m);
 	if (use_texture) {

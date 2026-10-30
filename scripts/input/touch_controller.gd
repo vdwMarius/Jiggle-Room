@@ -1,11 +1,16 @@
 class_name TouchController
 extends Node
-## Turns raw touches into jelly interactions.
+## Turns raw touches into jelly and camera interactions.
 ##
+## On a jelly:
 ##   tap          -> poke ripple
 ##   drag         -> grab & stretch (jelly follows the finger)
 ##   flick        -> throw with the finger's release velocity
 ##   two fingers  -> pinch to scale the touched jelly
+## On empty space (the camera):
+##   drag         -> orbit around the room
+##   two fingers  -> pan (move together) and zoom (pinch)
+##   double-tap   -> reset the view
 ##
 ## Mouse works too (project setting "emulate touch from mouse").
 
@@ -22,14 +27,19 @@ const THROW_GAIN := 1.0
 const MAX_THROW_SPEED := 16.0
 const FOLLOW_TIME := 0.07           # how quickly a held jelly catches the finger
 
-var camera: Camera3D
+const DOUBLE_TAP_TIME := 0.32
+
+var camera: CameraRig
 var room: Room
 ## Callable(pos: Vector2) -> bool. Lets the HUD swallow touches on its buttons.
 var is_over_ui: Callable
+## False in photo mode: touches only move the camera.
 var enabled := true
 
 var _touches := {}                  # index -> Touch
-var _pinch: Dictionary = {}         # active pinch state
+var _pinch: Dictionary = {}         # active jelly pinch state
+var _cam_pinch: Dictionary = {}     # active camera pan/zoom state
+var _last_empty_tap := -10.0
 var _px_scale := 1.0
 
 
@@ -43,6 +53,8 @@ class Touch:
 	var local_anchor := Vector3.ZERO   # grab point in the jelly's body space
 	var plane: Plane
 	var history: Array = []           # [time, world_point]
+	var orbiting := false             # empty-space drag moving the camera
+	var last_move_time := 0.0
 
 
 func _ready() -> void:
@@ -50,7 +62,7 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not enabled or camera == null:
+	if camera == null:
 		return
 	if event is InputEventScreenTouch:
 		var st := event as InputEventScreenTouch
@@ -72,6 +84,8 @@ func cancel_all() -> void:
 			t.jelly.end_grab()
 	_touches.clear()
 	_pinch.clear()
+	_cam_pinch.clear()
+	camera.end_drag()
 
 
 func _now() -> float:
@@ -84,25 +98,40 @@ func _on_down(index: int, pos: Vector2) -> void:
 	t.start_pos = pos
 	t.pos = pos
 	t.start_time = _now()
-	var hit := _raycast_jelly(pos)
+	t.last_move_time = t.start_time
+	var hit := _raycast_jelly(pos) if enabled else {}
 	if not hit.is_empty():
 		t.jelly = hit.collider
 		t.local_anchor = t.jelly.to_local(hit.position)
-		# Drag plane: through the touch point, facing the camera.
-		t.plane = Plane(camera.global_transform.basis.z, hit.position)
+		t.plane = _drag_plane(hit.position)
 	_touches[index] = t
 
 	if _touches.size() == 2:
 		_start_pinch()
+		if _pinch.is_empty():
+			_start_camera_pinch()
 
 
 func _on_move(index: int, pos: Vector2) -> void:
 	var t: Touch = _touches[index]
+	var moved := pos - t.pos
 	t.pos = pos
+	var now := _now()
+	var dt := now - t.last_move_time
+	t.last_move_time = now
 	if not _pinch.is_empty():
 		_update_pinch()
 		return
+	if not _cam_pinch.is_empty():
+		_update_camera_pinch()
+		return
 	if not is_instance_valid(t.jelly):
+		# Empty space: orbit the camera once the finger really moves.
+		if not t.orbiting and (pos - t.start_pos).length() > TAP_MAX_MOVE * _px_scale:
+			t.orbiting = true
+			camera.begin_drag()
+		if t.orbiting and _touches.size() == 1:
+			camera.orbit(moved, dt)
 		return
 	if not t.grabbing and (pos - t.start_pos).length() > TAP_MAX_MOVE * _px_scale:
 		t.grabbing = true
@@ -124,6 +153,17 @@ func _on_up(index: int, pos: Vector2) -> void:
 	if not _pinch.is_empty():
 		_end_pinch()
 		return
+	if not _cam_pinch.is_empty():
+		_cam_pinch.clear()
+		# The remaining finger continues as a fresh orbit drag, without a jump.
+		for other in _touches.values():
+			other.jelly = null
+			other.orbiting = true
+		camera.begin_drag()
+		return
+	if t.orbiting:
+		camera.end_drag()
+		return
 	var dt := _now() - t.start_time
 	if is_instance_valid(t.jelly):
 		if t.grabbing:
@@ -136,12 +176,17 @@ func _on_up(index: int, pos: Vector2) -> void:
 		elif dt < TAP_MAX_TIME * 2.0:
 			var hit := _raycast_jelly(pos)
 			var p: Vector3 = hit.position if not hit.is_empty() else t.jelly.to_global(t.local_anchor)
-			var n: Vector3 = hit.normal if not hit.is_empty() else -camera.global_transform.basis.z
+			var n: Vector3 = hit.normal if not hit.is_empty() else camera.global_transform.basis.z
 			# Quick taps poke harder than slow presses.
 			t.jelly.poke(p, n, lerpf(1.3, 0.8, clampf(dt / TAP_MAX_TIME, 0.0, 1.0)))
 			Feedback.poke()
 			poked.emit(t.jelly)
 	elif dt < TAP_MAX_TIME and (pos - t.start_pos).length() < TAP_MAX_MOVE * _px_scale:
+		if _now() - _last_empty_tap < DOUBLE_TAP_TIME:
+			camera.reset_view()
+			_last_empty_tap = -10.0
+		else:
+			_last_empty_tap = _now()
 		empty_tapped.emit(pos)
 
 
@@ -192,12 +237,7 @@ func _start_pinch() -> void:
 		if is_instance_valid(t.jelly):
 			j = t.jelly
 	if j == null:
-		var mid: Vector2 = (ts[0].pos + ts[1].pos) * 0.5
-		var hit := _raycast_jelly(mid)
-		if not hit.is_empty():
-			j = hit.collider
-	if j == null:
-		return
+		return  # neither finger is on a jelly: the camera gets this pinch
 	for t in ts:
 		if t.grabbing and is_instance_valid(t.jelly):
 			t.jelly.end_grab()
@@ -236,7 +276,43 @@ func _end_pinch() -> void:
 		Feedback.grab()
 
 
+# ------------------------------------------------------------------ camera pinch
+
+func _start_camera_pinch() -> void:
+	var ts := _touches.values()
+	camera.end_drag()
+	for t in ts:
+		t.orbiting = false
+	_cam_pinch = {
+		"mid": (ts[0].pos + ts[1].pos) * 0.5,
+		"dist": maxf((ts[0].pos - ts[1].pos).length(), 1.0),
+	}
+
+
+func _update_camera_pinch() -> void:
+	var ts := _touches.values()
+	if ts.size() < 2:
+		return
+	var mid: Vector2 = (ts[0].pos + ts[1].pos) * 0.5
+	var dist := maxf((ts[0].pos - ts[1].pos).length(), 1.0)
+	camera.pan(mid - _cam_pinch.mid)
+	camera.zoom(_cam_pinch.dist / dist)
+	_cam_pinch.mid = mid
+	_cam_pinch.dist = dist
+
+
 # ------------------------------------------------------------------ helpers
+
+## Plane the grabbed jelly moves in. Upright and facing the camera, so
+## dragging up lifts the jelly even when the camera looks down at the room;
+## when looking almost straight down, the screen plane works better.
+func _drag_plane(point: Vector3) -> Plane:
+	var back := camera.global_transform.basis.z
+	var flat := Vector3(back.x, 0.0, back.z)
+	if flat.length() > 0.45:
+		return Plane(flat.normalized(), point)
+	return Plane(back, point)
+
 
 func _raycast_jelly(screen_pos: Vector2) -> Dictionary:
 	var from := camera.project_ray_origin(screen_pos)

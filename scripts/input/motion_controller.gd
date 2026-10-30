@@ -51,10 +51,10 @@ func _apply_gravity(force: bool) -> void:
 		var g := Input.get_gravity()
 		if g.length() > 1.0:
 			# Device axes: x = screen right, y = screen up, z = out of screen.
-			var b := camera.global_transform.basis
+			# Mapped onto a level version of the camera (yaw only), so tilting
+			# feels the same however far the camera is pitched down.
+			var b := _level_basis()
 			dir = (b.x * g.x + b.y * g.y + b.z * g.z).normalized()
-			# Mostly steer within the room's view plane so tilting feels direct.
-			dir = (dir + Vector3(0, 0, -0.15)).normalized()
 	if mode == Mode.REVERSE:
 		dir = -dir
 	var strength := 0.0 if mode == Mode.ZERO_G else G
@@ -105,7 +105,7 @@ func _detect_shake(delta: float) -> void:
 func shake(device_accel: Vector3) -> void:
 	var dir := device_accel.normalized()
 	if camera:
-		var b := camera.global_transform.basis
+		var b := _level_basis()
 		dir = (b.x * dir.x + b.y * dir.y + b.z * dir.z * 0.3).normalized()
 	var strength := clampf(device_accel.length() * 0.18, 1.0, 4.5)
 	for jn in get_tree().get_nodes_in_group("jellies"):
@@ -115,3 +115,14 @@ func shake(device_accel: Vector3) -> void:
 		j.jolt((-dir + jitter) * strength)
 	Feedback.impact(strength * 2.0)
 	shaken.emit(strength)
+
+
+## Camera basis with the pitch removed: x = right, y = world up, z = toward viewer.
+func _level_basis() -> Basis:
+	var back := camera.global_transform.basis.z
+	back.y = 0.0
+	if back.length_squared() < 1e-4:
+		back = -camera.global_transform.basis.y
+		back.y = 0.0
+	back = back.normalized()
+	return Basis(Vector3.UP.cross(back).normalized(), Vector3.UP, back)

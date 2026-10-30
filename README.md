@@ -3,7 +3,9 @@
 A relaxing, tactile jelly-physics toy for Android, built with **Godot 4.3+**
 (GDScript, Mobile renderer, 3D). Pick a jelly (blob, cube, star, duck, dolphin,
 octopus, heart, or your own Blender models), then poke, drag, fling, pinch and
-shake it around a room you can customise.
+shake it around a furnished room (living room, bedroom, playroom, kitchen,
+plus unlockable aquarium and space station). Bounce it off the sofa, drop it
+on the bed, and move the camera anywhere in the room.
 
 The jelly is **not** a soft-body simulation. Each jelly is a `RigidBody3D` for
 motion, plus a vertex shader whose deformation is driven by a few damped
@@ -29,8 +31,8 @@ and every part of the feel can be tuned.
    **Mobile** renderer.
 3. **Press F5.** The game runs on desktop with the mouse standing in for touch
    (`input_devices/pointing/emulate_touch_from_mouse`). Desktop shortcuts:
-   `S` shake, `G` cycle gravity, `M` slow-mo, `P` photo mode, and the mouse
-   wheel to zoom in photo mode.
+   `S` shake, `G` cycle gravity, `M` slow-mo, `P` photo mode, `R` reset view,
+   the mouse wheel to zoom, and right-drag to pan.
 4. **To try a different window shape**, open Project Settings → Display →
    Window and set the size to 1280×720 to check landscape. The UI and room
    re-layout live.
@@ -45,12 +47,15 @@ and every part of the feel can be tuned.
 | Tap a jelly | Ripple spreads out from the finger, small dent and nudge |
 | Drag | Grab: the jelly follows the finger and stretches toward it, then springs back |
 | Flick and release | Throw, using the finger's speed over the last ~90 ms |
-| Two-finger pinch | Scale the jelly (0.5×–2.6×) |
+| Two-finger pinch on a jelly | Scale the jelly (0.5×–2.6×) |
+| Drag empty space | Orbit the camera around the room (with a little glide) |
+| Two fingers on empty space | Pan (move together) and zoom (pinch) |
+| Double-tap empty space, or **View** | Reset to the room's default view |
 | Shake the phone | Every jelly gets jolted (accelerometer) |
 | **Grav** button | Gravity on → zero-g (gentle drift) → reversed |
 | More → *Tilt phone* | Gravity follows the phone's tilt |
 | **Slow** | 0.25× time to admire the wobble |
-| **Photo** | Freeze, orbit/zoom the camera, save a PNG or a 2.5 s GIF |
+| **Photo** | Freeze, move the camera (*Focus* jumps to the last-touched jelly), save a PNG or a 2.5 s GIF |
 | Jelly → *Merge: On* | Drag one jelly into another (or smash them together) to merge into a bigger one |
 
 ---
@@ -76,8 +81,9 @@ scripts/
     jelly_springs.gd     Damped-spring system: stretch, lag, twist, impact, grab, ripples
     jelly_mesh_factory.gd  Procedural placeholder meshes + custom glTF mesh preparation
   room/
-    room_theme.gd        RoomTheme resource
-    room.gd              Walls/colliders, surfaces, lights, props, bouncy/sticky/slippery
+    room_theme.gd        RoomTheme resource: layout, size, colours, lighting
+    room.gd              Walls/colliders, surfaces, lights, furniture layouts, wall modes
+    furniture.gd         Primitive-built furniture with colliders (soft pieces are bouncy)
   input/
     touch_controller.gd  Tap / drag / flick / pinch
     motion_controller.gd Gravity modes, tilt steering, shake detection
@@ -85,7 +91,7 @@ scripts/
     ui_kit.gd            Touch-friendly theme and widget helpers
     hud.gd               Toolbar + panels (jelly, colour/feel, room, more), photo bar
   util/
-    camera_rig.gd        Room framing, photo-mode orbit
+    camera_rig.gd        Free orbit/pan/zoom camera that stays inside the room
     photo_mode.gd        Freeze, PNG screenshots, GIF capture
     gif_encoder.gd       Small GIF89a/LZW encoder (runs on a thread)
 shaders/
@@ -111,12 +117,16 @@ tools/blender/jelly_prep.py  Blender script: centre, decimate, auto-weights, exp
    Optionally set an `unlock_rule` such as `pokes:200`.
 5. Run. The picker lists every `.tres` in the folder.
 
-Adding a room theme works the same way: create a **RoomTheme** in `assets/rooms/`.
+Adding a room works the same way: create a **RoomTheme** in `assets/rooms/`,
+pick a `layout` (living room, bedroom, kitchen, playroom, aquarium, space),
+set `room_size`, and recolour the walls, floor, fabric, wood, accent and the
+sky seen through the windows. New furniture arrangements go in
+`Room._rebuild_furniture` using the `Furniture` builders.
 
 ### Unlocks and ads
 
-Duck, dolphin, octopus, heart and the aquarium and space themes unlock through
-play: pokes, throws, merges, minutes played and spawns. The rules are plain
+Duck, dolphin, octopus, heart, the kitchen, aquarium and space station unlock
+through play: pokes, throws, merges, minutes played and spawns. The rules are plain
 strings on each resource. There are **no interstitials or banners**. A locked
 item can show an optional "Watch ad to unlock" button, but only when an ad
 plugin is installed (`AdsService.is_available()`). In debug builds a fake 2 s

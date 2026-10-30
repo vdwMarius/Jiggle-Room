@@ -3,8 +3,6 @@ extends Node3D
 
 const JELLY_SCENE := preload("res://scenes/jelly_object.tscn")
 const MAX_JELLIES := 8
-const BASE_ROOM_HEIGHT := 3.6
-const BASE_ROOM_DEPTH := 2.2
 const SLOW_MO := 0.25
 const MERGE_MAX_RADIUS := 1.1
 
@@ -64,8 +62,8 @@ func _ready() -> void:
 		hud.refresh())
 	AdsService.ad_failed.connect(func(_id: String) -> void: hud.toast("No ad available right now"))
 
-	get_viewport().size_changed.connect(_on_resized)
-	apply_room(true)
+	apply_room()
+	camera.reset_view(true)
 	apply_options()
 	spawn_jelly(StringName(GameState.options.get("last_jelly", "blob")))
 
@@ -88,8 +86,8 @@ func spawn_jelly(id: StringName, at: Variant = null) -> JellyObject:
 	if at is Vector3:
 		pos = at
 	else:
-		var dims := room.dimensions
-		pos = Vector3(randf_range(-0.25, 0.25) * dims.x, dims.y * 0.75, randf_range(-0.15, 0.15) * dims.z)
+		# Drop it where the player is looking.
+		pos = camera.get_pivot() + Vector3(randf_range(-0.4, 0.4), 1.4, randf_range(-0.3, 0.3))
 	j.global_position = room.clamp_inside(pos, j.world_radius())
 	j.rotation.y = randf_range(-0.4, 0.4)
 	j.impacted.connect(_on_jelly_impacted)
@@ -118,7 +116,8 @@ func clear_jellies() -> void:
 
 func respawn_selected() -> void:
 	if is_instance_valid(selected):
-		selected.global_position = Vector3(0, room.dimensions.y - selected.world_radius() * 1.2, 0)
+		var above := camera.get_pivot() + Vector3.UP * (room.dimensions.y * 0.8)
+		selected.global_position = room.clamp_inside(above, selected.world_radius() * 1.2)
 		selected.linear_velocity = Vector3.ZERO
 		selected.angular_velocity = Vector3(randf(), randf(), randf())
 		selected.sleeping = false
@@ -134,8 +133,8 @@ func _on_poked(j: JellyObject) -> void:
 	GameState.add_stat("pokes")
 
 
-func _on_jelly_impacted(_j: JellyObject, speed: float) -> void:
-	Feedback.impact(speed)
+func _on_jelly_impacted(j: JellyObject, speed: float) -> void:
+	Feedback.impact(speed, j.data.wobble_frequency)
 
 
 ## Merge: in merge mode, two jellies that bump together (or one dragged into
@@ -218,37 +217,25 @@ func _physics_process(_delta: float) -> void:
 
 # ------------------------------------------------------------------ room
 
-## Re-apply GameState.room. `resize` also rebuilds walls & re-frames the camera.
-func apply_room(resize: bool = false) -> void:
+## Re-apply GameState.room. Rebuilds walls and furniture when the theme or
+## room size changed, and moves the camera to that room's default view.
+func apply_room(_resize: bool = false) -> void:
 	var theme := GameState.get_room_theme(GameState.room.theme)
 	room.theme = theme
-	if resize:
-		_resize_room()
+	var s: float = clampf(float(GameState.room.size), 0.7, 1.4)
+	# Height grows more slowly than the floor so big rooms don't feel like halls.
+	var dims := theme.room_size * Vector3(s, lerpf(1.0, s, 0.5), s)
+	var changed := not dims.is_equal_approx(room.dimensions)
+	if changed:
+		room.set_dimensions(dims)
 	room.apply_settings(GameState.room, theme)
+	if changed:
+		camera.reset_view()
+		for jn in get_tree().get_nodes_in_group("jellies"):
+			var j := jn as JellyObject
+			j.global_position = room.clamp_inside(j.global_position, j.world_radius())
+			j.sleeping = false
 	GameState.mark_dirty()
-
-
-func _resize_room() -> void:
-	var s: float = GameState.room.size
-	var vp := get_viewport().get_visible_rect().size
-	var aspect := vp.x / maxf(vp.y, 1.0)
-	var h := BASE_ROOM_HEIGHT * s
-	# Fit the room to the screen shape so it fills portrait and landscape alike.
-	var w := clampf(h * aspect * 0.98, 1.8 * s, 8.0 * s)
-	if aspect > 1.0:
-		h = BASE_ROOM_HEIGHT * s * 0.8
-		w = clampf(h * aspect * 0.98, 1.8 * s, 8.0 * s)
-	room.set_dimensions(Vector3(w, h, BASE_ROOM_DEPTH * s))
-	camera.frame_room()
-	for jn in get_tree().get_nodes_in_group("jellies"):
-		var j := jn as JellyObject
-		j.global_position = room.clamp_inside(j.global_position, j.world_radius())
-		j.sleeping = false
-
-
-func _on_resized() -> void:
-	if not photo.active:
-		_resize_room()
 
 
 func apply_options() -> void:
@@ -280,10 +267,9 @@ func set_photo_mode(on: bool) -> void:
 		if is_instance_valid(selected):
 			focus = selected.global_position
 		photo.enter(focus)
-		hud.toast("Drag to orbit · pinch to zoom", 2.0)
+		hud.toast("Drag to orbit · two fingers to pan & zoom", 2.0)
 	else:
 		photo.exit()
-		_resize_room()
 	hud.set_photo_mode(on)
 
 
@@ -307,3 +293,5 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			toggle_slow_motion()
 		KEY_P:
 			set_photo_mode(not photo.active)
+		KEY_R:
+			camera.reset_view()

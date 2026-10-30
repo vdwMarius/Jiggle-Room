@@ -12,6 +12,6 @@ procedural_shape = 3
 base_radius = 0.5
 collision = 0
 color = Color(1, 0.82, 0.25, 1)
-stiffness = 0.4
+stiffness = 0.3
 lag_amount = 1.3
 mass = 0.7

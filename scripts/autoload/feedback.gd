@@ -29,17 +29,35 @@ func _ready() -> void:
 		"boing": [_synth_boing(0.42, 210.0), _synth_boing(0.36, 260.0)],
 		"pop": [_synth_pop()],
 		"plop": [_synth_boing(0.6, 150.0)],
+		"wobble": [_synth_wobble(0.6, 95.0, 6.5), _synth_wobble(0.5, 120.0, 8.0)],
 	}
 	_load_custom_audio()
 
 
-## Impact feedback scaled by speed (m/s).
-func impact(speed: float) -> void:
+## Impact feedback scaled by speed (m/s). `wobble_hz` adds a decaying "tail"
+## of haptic pulses in time with the jelly's wobble, so you feel it jiggle.
+func impact(speed: float, wobble_hz: float = 0.0) -> void:
 	var s := clampf((speed - 0.6) / 8.0, 0.0, 1.0)
 	if s <= 0.02:
 		return
 	vibrate(int(lerpf(12, 45, s)), lerpf(0.25, 1.0, s))
 	play("boing" if speed > 4.0 and randf() < 0.6 else "squelch", lerpf(-18.0, 0.0, s), 90)
+	if speed > 2.5:
+		play("wobble", lerpf(-16.0, -4.0, s), 250)
+	if wobble_hz > 0.0 and s > 0.15:
+		_wobble_tail(s, wobble_hz)
+
+
+func _wobble_tail(strength: float, hz: float) -> void:
+	var amp := lerpf(0.25, 0.8, strength)
+	for i in 3:
+		amp *= 0.55
+		# Not ignoring time_scale: in slow-mo the pulses slow down with the wobble.
+		await get_tree().create_timer(1.0 / hz, true, false, false).timeout
+		if amp < 0.08:
+			return
+		_last_haptic_ms = 0
+		vibrate(int(lerpf(8, 20, amp)), amp)
 
 
 func poke() -> void:
@@ -137,6 +155,23 @@ func _synth_boing(length: float, base_hz: float) -> AudioStreamWAV:
 		var f := base_hz * lerpf(1.6, 0.8, sqrt(u)) * (1.0 + 0.12 * exp(-3.0 * u) * sin(TAU * 14.0 * t))
 		phase += TAU * f / MIX_RATE
 		out[i] = (sin(phase) + 0.25 * sin(phase * 2.0)) * env * 0.55
+	return _make_wav(out)
+
+
+## Low "wub-wub": a soft tone with amplitude wobble, like a jelly settling.
+func _synth_wobble(length: float, base_hz: float, wob_hz: float) -> AudioStreamWAV:
+	var n := int(length * MIX_RATE)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var phase := 0.0
+	for i in n:
+		var t := float(i) / MIX_RATE
+		var u := t / length
+		var env := minf(t / 0.02, 1.0) * exp(-3.5 * u)
+		var wob := 0.5 + 0.5 * cos(TAU * wob_hz * t * (1.0 - 0.3 * u))
+		var f := base_hz * (1.0 + 0.06 * sin(TAU * wob_hz * t))
+		phase += TAU * f / MIX_RATE
+		out[i] = (sin(phase) + 0.3 * sin(phase * 2.0) + 0.1 * sin(phase * 3.0)) * env * wob * 0.6
 	return _make_wav(out)
 
 

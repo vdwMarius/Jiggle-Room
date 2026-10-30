@@ -60,6 +60,17 @@ uniform vec3 impact_normal = vec3(0.0, 1.0, 0.0); // points from the wall into t
 uniform float impact_amount = 0.0;       // >0 flattened, <0 rebound bulge
 uniform vec3 impact_anchor = vec3(0.0, -0.5, 0.0); // point on the contact side that stays put
 
+// Ground frame: the classic "gelatin on a plate" wobble. The base stays put,
+// the top sways side to side, and the body sags a little under its own weight.
+uniform vec3 ground_up = vec3(0.0, 1.0, 0.0);      // local "up" (against gravity)
+uniform vec3 ground_anchor = vec3(0.0, -0.5, 0.0); // lowest point of the mesh along ground_up
+uniform float body_height = 1.0;                    // mesh extent along ground_up
+uniform float sag = 0.0;                            // >0 squashed by weight (volume kept)
+uniform vec3 sway = vec3(0.0);                      // top displacement / body_height (tangent)
+
+uniform vec3 wobble2_axis = vec3(1.0, 0.0, 0.0);   // second, faster wobble mode
+uniform float wobble2 = 0.0;
+
 varying vec3 v_local;
 varying float v_weight;
 
@@ -103,6 +114,30 @@ void vertex() {
 		float k = clamp(1.0 - impact_amount, 0.55, 1.6);
 		p = axis_scale(p, impact_anchor, impact_normal, k);
 		n = axis_scale_normal(n, impact_normal, k);
+	}
+
+	// 1b. Weight sag + faster secondary wobble mode (both volume preserving).
+	if (abs(sag) > 0.0001) {
+		float k = clamp(1.0 - sag, 0.6, 1.5);
+		p = axis_scale(p, ground_anchor, ground_up, k);
+		n = axis_scale_normal(n, ground_up, k);
+	}
+	if (abs(wobble2) > 0.0001) {
+		float k = clamp(1.0 + wobble2, 0.7, 1.4);
+		p = axis_scale(p, vec3(0.0), wobble2_axis, k);
+		n = axis_scale_normal(n, wobble2_axis, k);
+	}
+
+	// 1c. Sway: shear that grows with height above the base (h^1.5), so the
+	// bottom stays planted and the top wobbles side to side.
+	if (dot(sway, sway) > 1e-8) {
+		float h = clamp(dot(p - ground_anchor, ground_up) / body_height, 0.0, 1.3);
+		float f = pow(h, 1.5);
+		float df = 1.5 * sqrt(h) / body_height;
+		vec3 s = sway * body_height * mix(0.75, 1.0, w);
+		p += s * f;
+		// Inverse-transpose of the shear for the normal.
+		n = normalize(n - ground_up * dot(s, n) * df);
 	}
 
 	// 2. Squash & stretch along velocity (volume preserving).

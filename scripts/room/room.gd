@@ -1,9 +1,10 @@
 class_name Room
 extends Node3D
-## The customisable room: surfaces, invisible walls, lighting, props, wall modes.
+## A furnished room the jellies live in: walls, floor, ceiling (all visible,
+## the camera is inside), lighting, furniture with colliders and wall modes.
 ##
 ## The room is an axis-aligned box: floor at y = 0, centred on x = 0 and z = 0.
-## The front face (toward the camera) has a collider but no visual.
+## Back wall at -z, front wall at +z, left -x, right +x.
 
 signal rebuilt
 
@@ -11,7 +12,7 @@ const SURFACE_SHADER := preload("res://shaders/room_surface.gdshader")
 const WALL_THICKNESS := 2.0
 
 var theme: RoomTheme
-var dimensions := Vector3(3.0, 4.2, 2.4)
+var dimensions := Vector3(6.0, 2.8, 5.0)
 
 var _walls: Array[StaticBody3D] = []
 var _visuals := {}   # name -> MeshInstance3D
@@ -19,8 +20,8 @@ var _wall_material := PhysicsMaterial.new()
 var _floor_material := PhysicsMaterial.new()
 var _props_root: Node3D
 var _sun: DirectionalLight3D
-var _lamp: OmniLight3D
 var _env: WorldEnvironment
+var _built_key := ""
 
 
 func _ready() -> void:
@@ -28,17 +29,14 @@ func _ready() -> void:
 
 
 func _build_static() -> void:
+	# Soft "daylight through the windows" key light; the ceiling and walls
+	# don't cast shadows, so it reaches the furniture and jellies.
 	_sun = DirectionalLight3D.new()
 	_sun.shadow_enabled = true
 	_sun.shadow_blur = 2.0
-	_sun.directional_shadow_max_distance = 20.0
-	_sun.rotation_degrees = Vector3(-62, 28, 0)
+	_sun.directional_shadow_max_distance = 14.0
+	_sun.rotation_degrees = Vector3(-55, 35, 0)
 	add_child(_sun)
-
-	_lamp = OmniLight3D.new()
-	_lamp.omni_range = 8.0
-	_lamp.light_energy = 0.8
-	add_child(_lamp)
 
 	_env = WorldEnvironment.new()
 	var env := Environment.new()
@@ -61,17 +59,17 @@ func _build_static() -> void:
 		body.add_child(cs)
 		add_child(body)
 		_walls.append(body)
-		if n != "front":
-			var mi := MeshInstance3D.new()
-			mi.mesh = QuadMesh.new()
-			var mat := ShaderMaterial.new()
-			mat.shader = SURFACE_SHADER
-			mi.material_override = mat
-			add_child(mi)
-			_visuals[n] = mi
+		var mi := MeshInstance3D.new()
+		mi.mesh = QuadMesh.new()
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var mat := ShaderMaterial.new()
+		mat.shader = SURFACE_SHADER
+		mi.material_override = mat
+		add_child(mi)
+		_visuals[n] = mi
 
 	_props_root = Node3D.new()
-	_props_root.name = "Props"
+	_props_root.name = "Furniture"
 	add_child(_props_root)
 
 
@@ -81,7 +79,11 @@ func apply_settings(settings: Dictionary, new_theme: RoomTheme) -> void:
 	_apply_surfaces(settings)
 	_apply_lighting(settings)
 	_apply_modes(settings)
-	_rebuild_props(settings.get("props", true))
+	# Furniture only rebuilds when something that affects it changed.
+	var key := "%s|%s|%s|%s" % [theme.id, dimensions, settings.get("props", true), settings.get("light_color", "")]
+	if key != _built_key:
+		_built_key = key
+		_rebuild_furniture(settings)
 
 
 func set_dimensions(dims: Vector3) -> void:
@@ -90,7 +92,6 @@ func set_dimensions(dims: Vector3) -> void:
 	var h := dims.y
 	var d := dims.z
 	var t := WALL_THICKNESS
-	# name -> [box size, box centre, visual size, visual transform]
 	var layout := {
 		"floor": [Vector3(w + 2 * t, t, d + 2 * t), Vector3(0, -t / 2, 0)],
 		"ceiling": [Vector3(w + 2 * t, t, d + 2 * t), Vector3(0, h + t / 2, 0)],
@@ -106,16 +107,13 @@ func set_dimensions(dims: Vector3) -> void:
 		(cs.shape as BoxShape3D).size = entry[0]
 		body.position = entry[1]
 
-	# Visual quads (QuadMesh faces +Z by default).
+	# Visual quads face into the room (QuadMesh faces +Z by default).
 	_place_quad("floor", Vector2(w, d), Transform3D(Basis(Vector3.RIGHT, -PI / 2), Vector3(0, 0, 0)))
 	_place_quad("ceiling", Vector2(w, d), Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3(0, h, 0)))
 	_place_quad("back", Vector2(w, h), Transform3D(Basis(), Vector3(0, h / 2, -d / 2)))
+	_place_quad("front", Vector2(w, h), Transform3D(Basis(Vector3.UP, PI), Vector3(0, h / 2, d / 2)))
 	_place_quad("left", Vector2(d, h), Transform3D(Basis(Vector3.UP, PI / 2), Vector3(-w / 2, h / 2, 0)))
 	_place_quad("right", Vector2(d, h), Transform3D(Basis(Vector3.UP, -PI / 2), Vector3(w / 2, h / 2, 0)))
-
-	_lamp.position = Vector3(0, h * 0.85, d * 0.1)
-	if theme:
-		_rebuild_props(GameState.room.get("props", true))
 	rebuilt.emit()
 
 
@@ -183,20 +181,26 @@ func _apply_surfaces(settings: Dictionary) -> void:
 		mat.set_shader_parameter("use_texture", tex != null)
 		if tex:
 			mat.set_shader_parameter("tex", tex)
-		mat.set_shader_parameter("roughness_value", 0.35 if key == "floor" and pattern == RoomTheme.Pattern.PLANKS else 0.85)
+		var shiny := key == "floor" and (pattern == RoomTheme.Pattern.PLANKS or pattern == RoomTheme.Pattern.TILES)
+		mat.set_shader_parameter("roughness_value", 0.35 if shiny else 0.88)
+
+
+func _light_color(settings: Dictionary) -> Color:
+	return _color_or(settings, "light_color", theme.light_color)
 
 
 func _apply_lighting(settings: Dictionary) -> void:
-	var light_c := _color_or(settings, "light_color", theme.light_color)
+	var light_c := _light_color(settings)
 	var energy := float(settings.get("light_energy", 1.0))
-	_sun.light_color = light_c
-	_sun.light_energy = theme.light_energy * energy
-	_lamp.light_color = light_c
-	_lamp.light_energy = 0.8 * energy
+	_sun.light_color = theme.sky_color.lerp(light_c, 0.6)
+	_sun.light_energy = theme.light_energy * energy * 0.7
+	for l in get_tree().get_nodes_in_group("room_lamps"):
+		var lamp := l as OmniLight3D
+		lamp.light_energy = lamp.get_meta("base_energy", 1.0) * energy
 	var env := _env.environment
 	env.background_color = theme.wall_color.darkened(0.6)
 	env.ambient_light_color = theme.ambient_color.lerp(light_c, 0.3)
-	env.ambient_light_energy = theme.ambient_energy * lerpf(0.5, 1.0, clampf(energy, 0.0, 1.0))
+	env.ambient_light_energy = theme.ambient_energy * lerpf(0.4, 1.0, clampf(energy, 0.0, 1.0))
 	env.glow_enabled = theme.glow or energy < 0.4
 	env.glow_intensity = 0.6
 	env.glow_bloom = 0.05
@@ -222,158 +226,127 @@ func is_sticky() -> bool:
 	return GameState.room.get("wall_mode", "normal") == "sticky"
 
 
-# ------------------------------------------------------------------ props
+# ------------------------------------------------------------------ furniture
 
-func _rebuild_props(enabled: bool) -> void:
+func _rebuild_furniture(settings: Dictionary) -> void:
 	for c in _props_root.get_children():
+		_props_root.remove_child(c)
 		c.queue_free()
-	if not enabled or theme == null:
+	if theme == null:
 		return
 	var w := dimensions.x
 	var d := dimensions.z
 	var h := dimensions.y
-	match theme.props:
-		RoomTheme.Props.LOUNGE:
-			var sofa := Color(0.55, 0.3, 0.35)
-			_box(Vector3(-w * 0.18, 0.18, -d / 2 + 0.3), Vector3(w * 0.5, 0.36, 0.6), sofa)
-			_box(Vector3(-w * 0.18, 0.5, -d / 2 + 0.08), Vector3(w * 0.5, 0.6, 0.16), sofa.darkened(0.1))
-			_box(Vector3(-w * 0.18 - w * 0.25, 0.3, -d / 2 + 0.3), Vector3(0.14, 0.6, 0.6), sofa.darkened(0.15))
-			_box(Vector3(-w * 0.18 + w * 0.25, 0.3, -d / 2 + 0.3), Vector3(0.14, 0.6, 0.6), sofa.darkened(0.15))
-			_cylinder(Vector3(w * 0.36, 0.7, -d / 2 + 0.25), 0.03, 1.4, Color(0.3, 0.25, 0.2))
-			_sphere(Vector3(w * 0.36, 1.45, -d / 2 + 0.25), 0.2, Color(1.0, 0.9, 0.6), 1.2)
-			_cylinder(Vector3(0, 0.005, 0.1), w * 0.3, 0.01, Color(0.9, 0.75, 0.55), false)
-		RoomTheme.Props.AQUARIUM:
-			_sphere(Vector3(-w * 0.3, 0.05, -d / 2 + 0.4), 0.35, Color(0.45, 0.45, 0.5), 0.0, Vector3(1.3, 0.6, 1.0))
-			_sphere(Vector3(w * 0.25, 0.0, -d / 2 + 0.5), 0.3, Color(0.5, 0.48, 0.42), 0.0, Vector3(1.0, 0.8, 1.2))
-			for i in 4:
-				var x := lerpf(-w * 0.4, w * 0.4, i / 3.0)
-				_cylinder(Vector3(x, 0.4 + 0.15 * (i % 2), -d / 2 + 0.15), 0.05, 0.8 + 0.3 * (i % 2), Color(0.2, 0.6, 0.35))
-			_box(Vector3(w * 0.05, 0.15, -d / 2 + 0.35), Vector3(0.5, 0.3, 0.32), Color(0.6, 0.4, 0.15))
-		RoomTheme.Props.SPACE:
-			_box(Vector3(-w * 0.32, 0.25, -d / 2 + 0.35), Vector3(0.5, 0.5, 0.5), Color(0.75, 0.78, 0.82))
-			_box(Vector3(-w * 0.32, 0.65, -d / 2 + 0.35), Vector3(0.3, 0.3, 0.3), Color(0.9, 0.55, 0.2))
-			_cylinder(Vector3(w * 0.35, h * 0.5, -d / 2 + 0.15), 0.12, h, Color(0.55, 0.6, 0.7))
-			_sphere(Vector3(w * 0.1, h * 0.72, -d / 2 + 0.45), 0.28, Color(0.6, 0.4, 0.9), 0.4)
-		RoomTheme.Props.PLAYROOM:
-			var block_colors := [Color(0.95, 0.3, 0.3), Color(0.3, 0.6, 0.95), Color(0.98, 0.8, 0.25), Color(0.35, 0.8, 0.45)]
-			for i in 4:
-				_box(Vector3(-w * 0.35 + i * 0.32, 0.14, -d / 2 + 0.3), Vector3(0.28, 0.28, 0.28), block_colors[i])
-			_box(Vector3(-w * 0.35 + 0.48, 0.42, -d / 2 + 0.3), Vector3(0.28, 0.28, 0.28), block_colors[2])
-			var ramp := _box(Vector3(w * 0.28, 0.2, -d / 2 + 0.5), Vector3(0.9, 0.06, 0.7), Color(0.95, 0.6, 0.8))
-			ramp.rotation = Vector3(0, 0, 0.35)
-			_toy_ball(Vector3(w * 0.1, 1.2, 0.0))
+	var back := -d * 0.5
+	var front := d * 0.5
+	var left := -w * 0.5
+	var right := w * 0.5
+	var light_c := _light_color(settings)
+	var root := _props_root
+
+	# Things every interior gets: skirting boards and a ceiling light.
+	if theme.layout <= RoomTheme.Layout.PLAYROOM:
+		var trim := Color(0.97, 0.96, 0.94)
+		Furniture.box(root, Vector3(0, 0.05, back + 0.01), Vector3(w, 0.1, 0.02), trim, false)
+		Furniture.box(root, Vector3(0, 0.05, front - 0.01), Vector3(w, 0.1, 0.02), trim, false)
+		Furniture.box(root, Vector3(left + 0.01, 0.05, 0), Vector3(0.02, 0.1, d), trim, false)
+		Furniture.box(root, Vector3(right - 0.01, 0.05, 0), Vector3(0.02, 0.1, d), trim, false)
+		_lamp(Furniture.piece(root, Vector3(0, h, 0)), light_c, 1.4)
+
+	if not settings.get("props", true):
+		_tag_lamps()
+		return
+
+	match theme.layout:
+		RoomTheme.Layout.LIVING_ROOM:
+			Furniture.rug(Furniture.piece(root, Vector3(0, 0, -0.3)), Vector2(3.0, 2.1), theme.accent_color)
+			Furniture.sofa(Furniture.piece(root, Vector3(0, 0, back + 0.5)), theme.fabric_color, 2.4)
+			Furniture.coffee_table(Furniture.piece(root, Vector3(0, 0, back + 1.75)), theme.wood_color)
+			Furniture.armchair(Furniture.piece(root, Vector3(right - 0.7, 0, back + 1.9), -70.0), theme.fabric_color.lerp(theme.accent_color, 0.4))
+			Furniture.tv_unit(Furniture.piece(root, Vector3(left + 0.25, 0, -0.1), 90.0), theme.wood_color)
+			Furniture.bookshelf(Furniture.piece(root, Vector3(right - 0.2, 0, back + 0.55), -90.0), theme.wood_color)
+			Furniture.floor_lamp(Furniture.piece(root, Vector3(left + 0.45, 0, back + 0.4)), light_c)
+			Furniture.plant(Furniture.piece(root, Vector3(right - 0.45, 0, front - 0.5)))
+			Furniture.plant(Furniture.piece(root, Vector3(left + 0.4, 0, front - 0.45)), false)
+			Furniture.window(Furniture.piece(root, Vector3(0, 1.65, back + 0.001)), Vector2(1.8, 1.1), theme.sky_color, theme.accent_color.darkened(0.1))
+			Furniture.picture(Furniture.piece(root, Vector3(left + 0.001, 1.75, back + 1.2), 90.0), Vector2(0.6, 0.45), theme.accent_color)
+			Furniture.picture(Furniture.piece(root, Vector3(right - 0.001, 1.6, 0.6), -90.0), Vector2(0.5, 0.7), theme.fabric_color)
+			Furniture.door(Furniture.piece(root, Vector3(right - 1.0, 0, front - 0.001), 180.0), theme.wood_color.lightened(0.2))
+		RoomTheme.Layout.BEDROOM:
+			Furniture.rug(Furniture.piece(root, Vector3(0, 0, -0.1)), Vector2(2.8, 2.0), theme.accent_color)
+			Furniture.bed(Furniture.piece(root, Vector3(0, 0, back + 1.12)), theme.fabric_color, theme.wood_color)
+			Furniture.nightstand(Furniture.piece(root, Vector3(-1.25, 0, back + 0.3)), theme.wood_color, light_c)
+			Furniture.nightstand(Furniture.piece(root, Vector3(1.25, 0, back + 0.3)), theme.wood_color, light_c)
+			Furniture.wardrobe(Furniture.piece(root, Vector3(left + 0.32, 0, back + 1.0), 90.0), theme.wood_color)
+			Furniture.desk(Furniture.piece(root, Vector3(right - 0.35, 0, front - 1.2), -90.0), theme.wood_color)
+			Furniture.beanbag(Furniture.piece(root, Vector3(left + 0.8, 0, front - 0.8)), theme.accent_color)
+			Furniture.plant(Furniture.piece(root, Vector3(right - 0.4, 0, back + 0.4)), false)
+			Furniture.window(Furniture.piece(root, Vector3(right - 0.001, 1.55, back + 1.4), -90.0), Vector2(1.2, 1.1), theme.sky_color, theme.fabric_color.lightened(0.3))
+			Furniture.picture(Furniture.piece(root, Vector3(0, 1.85, back + 0.001)), Vector2(0.9, 0.5), theme.accent_color)
+			Furniture.door(Furniture.piece(root, Vector3(0.6, 0, front - 0.001), 180.0), theme.wood_color.lightened(0.25))
+		RoomTheme.Layout.KITCHEN:
+			Furniture.counter_run(Furniture.piece(root, Vector3(-0.4, 0, back + 0.3)), minf(w - 1.6, 3.6), theme.fabric_color, theme.accent_color.lightened(0.5), true)
+			Furniture.fridge(Furniture.piece(root, Vector3(right - 0.45, 0, back + 0.38)))
+			Furniture.dining_table(Furniture.piece(root, Vector3(0.2, 0, 0.6)), theme.wood_color, theme.fabric_color.lightened(0.2))
+			Furniture.plant(Furniture.piece(root, Vector3(left + 0.4, 0, front - 0.45)))
+			Furniture.window(Furniture.piece(root, Vector3(left + 0.001, 1.5, 0.3), 90.0), Vector2(1.3, 1.0), theme.sky_color, theme.accent_color)
+			Furniture.picture(Furniture.piece(root, Vector3(right - 0.001, 1.6, 0.8), -90.0), Vector2(0.5, 0.5), theme.accent_color)
+			Furniture.door(Furniture.piece(root, Vector3(-1.2, 0, front - 0.001), 180.0), theme.wood_color)
+			var pendant := Furniture.piece(root, Vector3(0.2, h, 0.6))
+			_lamp(pendant, light_c, 0.8)
+		RoomTheme.Layout.PLAYROOM:
+			Furniture.rug(Furniture.piece(root, Vector3(0, 0, 0)), Vector2(2.6, 2.6), theme.accent_color, true)
+			Furniture.toy_blocks(Furniture.piece(root, Vector3(left + 1.0, 0, back + 0.5)))
+			Furniture.beanbag(Furniture.piece(root, Vector3(right - 0.8, 0, back + 0.8)), theme.fabric_color)
+			Furniture.beanbag(Furniture.piece(root, Vector3(right - 0.7, 0, front - 1.0)), theme.accent_color)
+			Furniture.toy_box(Furniture.piece(root, Vector3(0.6, 0, back + 0.35)))
+			Furniture.slide(Furniture.piece(root, Vector3(left + 0.9, 0, front - 1.2), 90.0))
+			Furniture.bookshelf(Furniture.piece(root, Vector3(-0.6, 0, back + 0.2)), theme.wood_color, 1.1)
+			Furniture.window(Furniture.piece(root, Vector3(right - 0.001, 1.5, 0.0), -90.0), Vector2(1.4, 1.0), theme.sky_color, theme.accent_color)
+			Furniture.picture(Furniture.piece(root, Vector3(left + 0.001, 1.6, 0.0), 90.0), Vector2(0.7, 0.5), theme.fabric_color)
+			var ball := Furniture.toy_ball(root, Color(1.0, 0.45, 0.2), 0.18)
+			ball.position = Vector3(0.3, 1.0, 0.3)
+			var ball2 := Furniture.toy_ball(root, Color(0.35, 0.7, 1.0), 0.12)
+			ball2.position = Vector3(-0.5, 1.2, 0.5)
+		RoomTheme.Layout.AQUARIUM:
+			Furniture.sphere(root, Vector3(left + 1.0, 0.05, back + 0.8), 0.6, Color(0.45, 0.45, 0.5), true, Vector3(1.3, 0.6, 1.0))
+			Furniture.sphere(root, Vector3(right - 1.2, 0.0, back + 1.0), 0.5, Color(0.5, 0.48, 0.42), true, Vector3(1.0, 0.8, 1.2))
+			Furniture.sphere(root, Vector3(0.8, 0.0, front - 1.0), 0.35, Color(0.55, 0.5, 0.45), true, Vector3(1.2, 0.6, 1.0))
+			for i in 7:
+				var x := lerpf(left + 0.5, right - 0.5, i / 6.0)
+				var tall := 1.0 + 0.6 * float(i % 3)
+				Furniture.cylinder(root, Vector3(x, tall * 0.5, back + 0.25 + 0.15 * float(i % 2)), 0.06, tall, Color(0.2, 0.6, 0.35))
+			Furniture.box(root, Vector3(0, 0.2, back + 0.6), Vector3(0.8, 0.4, 0.5), Color(0.6, 0.4, 0.15))
+			Furniture.sphere(root, Vector3(0, 0.45, back + 0.6), 0.12, Color(1.0, 0.85, 0.3), false, Vector3.ONE, false, 1.5)
+			_lamp(Furniture.piece(root, Vector3(0, h, 0)), light_c, 1.0)
+		RoomTheme.Layout.SPACE:
+			Furniture.box(root, Vector3(left + 0.8, 0.35, back + 0.6), Vector3(0.7, 0.7, 0.7), Color(0.75, 0.78, 0.82))
+			Furniture.box(root, Vector3(left + 0.8, 0.9, back + 0.6), Vector3(0.4, 0.4, 0.4), Color(0.9, 0.55, 0.2))
+			Furniture.box(root, Vector3(left + 1.6, 0.3, back + 0.5), Vector3(0.6, 0.6, 0.6), Color(0.7, 0.72, 0.78))
+			Furniture.cylinder(root, Vector3(right - 0.4, h * 0.5, back + 0.3), 0.15, h, Color(0.55, 0.6, 0.7))
+			Furniture.cylinder(root, Vector3(right - 0.9, h * 0.5, back + 0.3), 0.1, h, Color(0.5, 0.55, 0.65))
+			Furniture.box(root, Vector3(0.4, 0.5, back + 0.35), Vector3(1.6, 1.0, 0.5), Color(0.3, 0.32, 0.4))
+			var console := Furniture.box(root, Vector3(0.4, 1.02, back + 0.3), Vector3(1.4, 0.04, 0.35), Color(0.2, 0.9, 0.8), false)
+			console.material_override = Furniture.mat(Color(0.2, 0.9, 0.8), 0.3, 1.2)
+			Furniture.sphere(root, Vector3(0.5, h * 0.62, 0.0), 0.35, Color(0.6, 0.4, 0.9), true, Vector3.ONE, true, 0.4)
+			Furniture.window(Furniture.piece(root, Vector3(0, 1.5, back + 0.001)), Vector2(2.4, 1.0), theme.sky_color, Color(0.3, 0.32, 0.4))
+			_lamp(Furniture.piece(root, Vector3(0, h, 0)), light_c, 0.9)
+	_tag_lamps()
 
 
-func _prop_body(pos: Vector3) -> StaticBody3D:
-	var body := StaticBody3D.new()
-	body.collision_layer = 4
-	body.collision_mask = 0
-	body.position = pos
-	body.add_to_group("props")
-	_props_root.add_child(body)
-	return body
+func _lamp(at: Node3D, c: Color, energy: float) -> void:
+	Furniture.ceiling_light(at, c, energy)
 
 
-func _std_mat(c: Color, emission: float = 0.0) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = c
-	m.roughness = 0.7
-	if emission > 0.0:
-		m.emission_enabled = true
-		m.emission = c
-		m.emission_energy_multiplier = emission
-	return m
-
-
-func _box(pos: Vector3, size3: Vector3, c: Color) -> StaticBody3D:
-	var body := _prop_body(pos)
-	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size3
-	mi.mesh = bm
-	mi.material_override = _std_mat(c)
-	body.add_child(mi)
-	var cs := CollisionShape3D.new()
-	var shape := BoxShape3D.new()
-	shape.size = size3
-	cs.shape = shape
-	body.add_child(cs)
-	return body
-
-
-func _cylinder(pos: Vector3, radius: float, height: float, c: Color, collide: bool = true) -> StaticBody3D:
-	var body := _prop_body(pos)
-	var mi := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = radius
-	cm.bottom_radius = radius
-	cm.height = height
-	mi.mesh = cm
-	mi.material_override = _std_mat(c)
-	body.add_child(mi)
-	if collide:
-		var cs := CollisionShape3D.new()
-		var shape := CylinderShape3D.new()
-		shape.radius = radius
-		shape.height = height
-		cs.shape = shape
-		body.add_child(cs)
-	return body
-
-
-func _sphere(pos: Vector3, radius: float, c: Color, emission: float = 0.0, squash := Vector3.ONE) -> StaticBody3D:
-	var body := _prop_body(pos)
-	var mi := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = radius
-	sm.height = radius * 2.0
-	mi.mesh = sm
-	mi.scale = squash
-	mi.material_override = _std_mat(c, emission)
-	body.add_child(mi)
-	var cs := CollisionShape3D.new()
-	if squash == Vector3.ONE:
-		var shape := SphereShape3D.new()
-		shape.radius = radius
-		cs.shape = shape
-	else:
-		# Non-uniformly scaled collision isn't supported; use a matching hull.
-		var pts := PackedVector3Array()
-		for v in sm.get_mesh_arrays()[Mesh.ARRAY_VERTEX]:
-			pts.append(v * squash)
-		var hull := ConvexPolygonShape3D.new()
-		hull.points = pts
-		cs.shape = hull
-	body.add_child(cs)
-	if emission > 0.0:
-		var l := OmniLight3D.new()
-		l.light_color = c
-		l.light_energy = emission * 0.6
-		l.omni_range = 2.0
-		body.add_child(l)
-	return body
-
-
-func _toy_ball(pos: Vector3) -> void:
-	var ball := RigidBody3D.new()
-	ball.collision_layer = 4
-	ball.collision_mask = 1 | 2 | 4
-	ball.mass = 0.3
-	ball.position = pos
-	var pm := PhysicsMaterial.new()
-	pm.bounce = 0.7
-	ball.physics_material_override = pm
-	var mi := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 0.16
-	sm.height = 0.32
-	mi.mesh = sm
-	mi.material_override = _std_mat(Color(1.0, 0.45, 0.2))
-	ball.add_child(mi)
-	var cs := CollisionShape3D.new()
-	var shape := SphereShape3D.new()
-	shape.radius = 0.16
-	cs.shape = shape
-	ball.add_child(cs)
-	ball.add_to_group("props")
-	_props_root.add_child(ball)
+## Remember every furniture light's design energy so the brightness slider
+## can scale them all.
+func _tag_lamps() -> void:
+	var stack: Array[Node] = [_props_root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is OmniLight3D:
+			n.add_to_group("room_lamps")
+			if not n.has_meta("base_energy"):
+				n.set_meta("base_energy", (n as OmniLight3D).light_energy)
+		stack.append_array(n.get_children())
+	_apply_lighting(GameState.room)

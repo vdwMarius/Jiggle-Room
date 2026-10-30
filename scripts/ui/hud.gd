@@ -65,6 +65,9 @@ func _ready() -> void:
 	_photo_bar.add_child(pb)
 	_freeze_button = UiKit.button("Play", _on_freeze)
 	pb.add_child(_freeze_button)
+	pb.add_child(UiKit.button("Focus", func() -> void:
+		if is_instance_valid(main.selected):
+			main.camera.focus(main.selected.global_position, 1.4)))
 	pb.add_child(UiKit.button("Snap", func() -> void: main.photo.take_screenshot()))
 	_gif_button = UiKit.button("GIF", func() -> void: main.photo.record_gif())
 	pb.add_child(_gif_button)
@@ -109,6 +112,9 @@ func _build_toolbar() -> void:
 	_slow_button.toggle_mode = true
 	_slow_button.button_pressed = Engine.time_scale < 1.0
 	_toolbar.add_child(_slow_button)
+	_toolbar.add_child(UiKit.button("View", func() -> void:
+		main.camera.reset_view()
+		toast("Drag empty space to look around · two fingers to pan & zoom · double-tap to reset", 3.0)))
 	_toolbar.add_child(UiKit.button("Photo", func() -> void: main.set_photo_mode(true)))
 	_toolbar.add_child(UiKit.button("More", _toggle_panel.bind("more")))
 
@@ -274,9 +280,22 @@ func _build_jelly_panel() -> void:
 	row.add_child(UiKit.button("Drop from top", func() -> void: main.respawn_selected()))
 	var hint := Label.new()
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.text = "Tap = poke · Drag = stretch · Flick = throw · Pinch = resize · Shake phone = shake"
+	hint.text = "Jelly: tap = poke · drag = stretch · flick = throw · pinch = resize · shake phone = shake\nRoom: drag empty space = look around · two fingers = pan & zoom · double-tap = reset view"
 	hint.add_theme_font_size_override("font_size", 20)
 	_panel_body.add_child(hint)
+
+
+## Rebuilding walls and furniture is too heavy to do on every slider tick.
+var _room_rebuild_pending := false
+
+
+func _queue_room_rebuild() -> void:
+	if _room_rebuild_pending:
+		return
+	_room_rebuild_pending = true
+	await get_tree().create_timer(0.35, true, false, true).timeout
+	_room_rebuild_pending = false
+	main.apply_room()
 
 
 func _watch_ad(id: String) -> void:
@@ -336,7 +355,7 @@ func _build_look_panel() -> void:
 	UiKit.slider(_panel_body, "Wobble Hz", 1.0, 8.0, d.wobble_frequency, func(v: float) -> void:
 		d.wobble_frequency = v
 		_feel_changed(j))
-	UiKit.slider(_panel_body, "Max squish", 0.1, 0.35, d.max_deformation, func(v: float) -> void:
+	UiKit.slider(_panel_body, "Max squish", 0.1, 0.36, d.max_deformation, func(v: float) -> void:
 		d.max_deformation = v
 		_feel_changed(j))
 	UiKit.slider(_panel_body, "Mass", 0.2, 5.0, d.mass, func(v: float) -> void:
@@ -344,6 +363,9 @@ func _build_look_panel() -> void:
 		_feel_changed(j))
 	UiKit.slider(_panel_body, "Bounciness", 0.0, 0.95, d.bounciness, func(v: float) -> void:
 		d.bounciness = v
+		_feel_changed(j))
+	UiKit.slider(_panel_body, "Sway", 0.0, 2.0, d.sway_amount, func(v: float) -> void:
+		d.sway_amount = v
 		_feel_changed(j))
 	var row := UiKit.flow(_panel_body, 2)
 	row.add_child(UiKit.button("Test wobble", func() -> void: j.jolt(Vector3.UP * 2.5)))
@@ -389,9 +411,9 @@ func _build_room_panel() -> void:
 			themes.add_child(b)
 			if AdsService.is_available():
 				themes.add_child(UiKit.button("Ad: unlock " + t.display_name, _watch_ad.bind(String(t.id))))
-	UiKit.slider(_panel_body, "Room size", 0.7, 1.6, float(r.size), func(v: float) -> void:
+	UiKit.slider(_panel_body, "Room size", 0.7, 1.4, float(r.size), func(v: float) -> void:
 		r.size = v
-		main.apply_room(true))
+		_queue_room_rebuild())
 	for key in [["wall_color", "Walls"], ["floor_color", "Floor"], ["ceiling_color", "Ceiling"]]:
 		UiKit.heading(_panel_body, key[1])
 		var sw := UiKit.flow(_panel_body)

@@ -6,6 +6,8 @@ signal unlocked(kind: String, id: String, display_name: String)
 signal settings_changed
 
 const SAVE_PATH := "user://jiggle_room.json"
+## v2: juicier default feel + furnished rooms (see _migrate).
+const SAVE_VERSION := 2
 const JELLY_DIR := "res://assets/jellies/"
 const ROOM_DIR := "res://assets/rooms/"
 
@@ -15,7 +17,7 @@ var room_themes: Array[RoomTheme] = []
 ## jelly id -> Dictionary of JellyData overrides (colour, opacity, feel ...)
 var jelly_overrides: Dictionary = {}
 var room := {
-	"theme": "cosy_lounge",
+	"theme": "living_room",
 	"size": 1.0,
 	"wall_color": "",      # "" = use theme default
 	"floor_color": "",
@@ -186,7 +188,7 @@ func mark_dirty() -> void:
 
 func save_game() -> void:
 	var payload := {
-		"version": 1,
+		"version": SAVE_VERSION,
 		"jelly_overrides": jelly_overrides,
 		"room": room,
 		"options": options,
@@ -214,3 +216,17 @@ func load_game() -> void:
 	options.merge(parsed.get("options", {}), true)
 	stats.merge(parsed.get("stats", {}), true)
 	bonus_unlocks = parsed.get("bonus_unlocks", [])
+	_migrate(int(parsed.get("version", 1)))
+
+
+func _migrate(from_version: int) -> void:
+	if from_version < 2:
+		# New, wobblier defaults: drop old saved feel values so they apply.
+		for id in jelly_overrides:
+			for key in ["stiffness", "damping", "wobble_frequency", "max_deformation"]:
+				jelly_overrides[id].erase(key)
+		# Rooms became furnished interiors with new ids.
+		var renamed := {"cosy_lounge": "living_room"}
+		room.theme = renamed.get(room.theme, room.theme)
+		room.size = 1.0
+		mark_dirty()

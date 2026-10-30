@@ -48,6 +48,9 @@ That keeps it stable even at 8 Hz on a 30 FPS hitch.
 | `impact` | Velocity kick `amount × ω` on a hit | Flattens, rebounds, and rings 2–4 times |
 | `grab` | Follows the finger while held (critically damped); target becomes 0 on release (underdamped) | Stretches toward the finger, then snaps back with a wobble |
 | ripples | Ring buffer of 8 `(origin, start time, amplitude)` | Concentric waves from each tap |
+| `sway` | Drive = `-sideways acceleration`; kicked by pokes, grab release and jolts. Runs at 0.7× the frequency | The top sways over a planted base, like gelatin on a plate |
+| `sag` | Target = `sag_amount` while resting on something, 0 in the air, in zero-g or while held | Soft resting squash; landing wobbles down into it |
+| `wobble2` | Kicked on every hit around a random axis across the hit. Runs at 1.65× the frequency | Faster elliptical shimmer on top of the main bounce |
 
 The springs use their own clock (`time += delta`). That means slow-motion
 (`Engine.time_scale`) slows the wobble too, and photo mode (`SceneTree.paused`)
@@ -64,6 +67,10 @@ order:
    anchor comes from the AABB, so a long dolphin flattens against the floor
    instead of sinking into it. When it compresses along the normal, the
    perpendicular axes grow by `1/√k`, which is why it bulges sideways.
+   **Ground frame.** A volume-preserving `sag` along local "up" (from
+   gravity), anchored at the base, then the `wobble2` ellipse, then a `sway`
+   shear that grows with height above the base (`h^1.5`), with its normals
+   corrected by the shear's inverse-transpose.
 2. **Squash and stretch.** The same volume-preserving scale, along the
    velocity axis.
 3. **Secondary motion.** `p += lag × w × reach²` plus a rotation of
@@ -137,3 +144,23 @@ vertices. Meshes are cached and shared between jellies of the same type.
 * Physics: convex hulls (simplified) at 60 Hz, `max_contacts_reported = 6`.
 * Shadows: one directional light. If you're GPU-bound, drop
   `shadow_blur` or disable it in the Room script.
+
+## 6. Rooms and camera
+
+* **Rooms** are real-scale furnished interiors (e.g. a 6 × 2.8 × 5 m living
+  room). All six surfaces are visible because the camera lives inside. Each
+  `RoomTheme` picks a `layout`. `Room._rebuild_furniture` places pieces from
+  `Furniture` (sofa, armchair, coffee table, TV unit, bookshelf, lamps, bed,
+  nightstands, wardrobe, desk, kitchen counters, fridge, dining set, toys,
+  beanbags, windows, pictures, doors). Each piece is a handful of primitive
+  meshes with box/cylinder/hull colliders. Cushions, mattresses and beanbags
+  use a bouncy physics material. Furniture only rebuilds when the theme,
+  size, props toggle or light colour changes.
+* **Camera** (`CameraRig`) is an orbit camera around a pivot: yaw, pitch and
+  distance, all exponentially smoothed, with flick inertia. Before each frame
+  the distance is shortened analytically against the room box, so the camera
+  never leaves the room. `TouchController` sends it every touch that doesn't
+  start on a jelly: one finger orbits, two fingers pan and zoom, and a
+  double-tap resets. Grabbed jellies move in an upright plane facing the
+  camera, so dragging up always lifts them. Tilt-gravity and shake use the
+  camera's yaw only, so they feel the same at any pitch.

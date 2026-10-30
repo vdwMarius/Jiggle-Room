@@ -3,9 +3,12 @@ extends RefCounted
 ## Damped springs that drive the jelly shader.
 ##
 ## Every spring obeys  x'' = -w^2 (x - target) - 2*zeta*w*x' + force
-## where w = 2*pi*wobble_frequency and zeta = damping ratio. With zeta ~0.2 an
-## impulse rings for 2-4 visible cycles and settles in roughly 4 / (zeta*w)
-## seconds (~1-1.2 s at 3.2 Hz) - "firm gelatin dessert".
+## where w = 2*pi*wobble_frequency and zeta = damping ratio. With the default
+## zeta 0.12 at 2.6 Hz an impulse rings for 4-6 visible cycles and settles in
+## roughly 4 / (zeta*w) ~ 2 s - a big, juicy gelatin wobble.
+##
+## Several modes ring at different frequencies so the motion never looks like
+## one simple bounce: sway (0.7x), body (1x), stretch (1x), second mode (1.65x).
 ##
 ## All vectors are in mesh-local space. Integration is semi-implicit Euler with
 ## sub-stepping so high frequencies stay stable at any frame rate.
@@ -34,6 +37,21 @@ var impact_vel := 0.0
 var impact_normal := Vector3.UP
 var impact_anchor := Vector3(0, -0.5, 0)
 
+# Ground frame: sway (top wobbles, base planted) and weight sag.
+var sway := Vector3.ZERO
+var sway_vel := Vector3.ZERO
+var sag := 0.0
+var sag_vel := 0.0
+var sag_target := 0.0
+var ground_up := Vector3.UP
+var ground_anchor := Vector3(0, -0.5, 0)
+var body_height := 1.0
+
+# Second, faster wobble mode (elliptical ring after hits).
+var wobble2 := 0.0
+var wobble2_vel := 0.0
+var wobble2_axis := Vector3.RIGHT
+
 # Grab (finger pull).
 var grab := Vector3.ZERO
 var grab_vel := Vector3.ZERO
@@ -47,6 +65,7 @@ var ripple_amps := PackedFloat32Array()
 var _next_ripple := 0
 
 var time := 0.0
+var secondary_wobble := 0.7
 
 
 func _init() -> void:
@@ -60,6 +79,7 @@ func configure(data: JellyData) -> void:
 	omega = TAU * data.wobble_frequency
 	zeta = data.damping
 	stiffness = data.stiffness
+	secondary_wobble = data.secondary_wobble
 
 
 func add_ripple(local_origin: Vector3, amplitude: float) -> void:
@@ -82,6 +102,17 @@ func add_impact(local_normal: Vector3, amount: float) -> void:
 		impact_normal = local_normal
 	# Give the spring a velocity that peaks at roughly `amount`.
 	impact_vel += amount * omega
+	# Also ring the faster second mode around a random axis across the hit,
+	# which turns a plain bounce into a rich, wobbly jiggle.
+	var tangent := local_normal.cross(Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)))
+	if tangent.length_squared() > 1e-4:
+		wobble2_axis = tangent.normalized()
+		wobble2_vel += amount * omega * 1.65 * secondary_wobble
+
+
+## Push the top of the jelly sideways (local units of "fraction of height").
+func add_sway(local_push: Vector3) -> void:
+	sway_vel += local_push - ground_up * local_push.dot(ground_up)
 
 
 func update(dt: float, local_accel: Vector3, local_ang_accel: Vector3, local_velocity: Vector3, data: JellyData) -> void:
@@ -111,7 +142,28 @@ func update(dt: float, local_accel: Vector3, local_ang_accel: Vector3, local_vel
 	var lc := 2.0 * zeta * lw
 	var lag_drive := -local_accel * data.lag_amount * softness * 0.012
 	var twist_drive := -local_ang_accel * data.lag_amount * softness * 0.0025
+	# Sway: slower, looser mode driven by sideways acceleration.
+	var sw := omega * 0.7
+	var sw2 := sw * sw
+	var sc := 2.0 * zeta * 0.85 * sw
+	var tangential_acc := local_accel - ground_up * local_accel.dot(ground_up)
+	var sway_drive := -tangential_acc * data.sway_amount * softness * 0.01
+	# Second mode: faster and a little more damped.
+	var w2b := omega * 1.65
+	var w2b2 := w2b * w2b
+	var c2b := 2.0 * minf(zeta * 1.2, 0.9) * w2b
 	for _i in steps:
+		sway_vel += (-sw2 * sway - sc * sway_vel + sway_drive * sw2) * h
+		# Keep the sway perpendicular to "up" as the jelly rotates.
+		sway_vel -= ground_up * sway_vel.dot(ground_up)
+		sway += sway_vel * h
+
+		sag_vel += (-w2 * (sag - sag_target) - c * sag_vel) * h
+		sag += sag_vel * h
+
+		wobble2_vel += (-w2b2 * wobble2 - c2b * wobble2_vel) * h
+		wobble2 += wobble2_vel * h
+
 		stretch_vel += (-w2 * (stretch - stretch_target) - c * stretch_vel) * h
 		stretch += stretch_vel * h
 
@@ -133,13 +185,18 @@ func update(dt: float, local_accel: Vector3, local_ang_accel: Vector3, local_vel
 	impact = clampf(impact, -cap * 0.6, cap * 1.3)
 	lag = lag.limit_length(cap * 1.5)
 	twist = twist.limit_length(0.6)
+	sway -= ground_up * sway.dot(ground_up)
+	sway = sway.limit_length(cap * 1.2)
+	sag = clampf(sag, -cap * 0.5, cap)
+	wobble2 = clampf(wobble2, -cap * 0.8, cap * 0.8)
 
 
 func is_settled() -> bool:
 	return absf(stretch) < 0.002 and absf(stretch_vel) < 0.01 \
 		and lag.length_squared() < 1e-6 and lag_vel.length_squared() < 1e-5 \
 		and absf(impact) < 0.002 and absf(impact_vel) < 0.01 \
-		and grab.length_squared() < 1e-6 and not grabbing
+		and grab.length_squared() < 1e-6 and not grabbing \
+		and sway.length_squared() < 1e-6 and absf(wobble2) < 0.002
 
 
 func apply_to(mat: ShaderMaterial, radius: float) -> void:
@@ -153,5 +210,12 @@ func apply_to(mat: ShaderMaterial, radius: float) -> void:
 	mat.set_shader_parameter("impact_anchor", impact_anchor)
 	mat.set_shader_parameter("grab_point", grab_point)
 	mat.set_shader_parameter("grab_offset", grab)
+	mat.set_shader_parameter("ground_up", ground_up)
+	mat.set_shader_parameter("ground_anchor", ground_anchor)
+	mat.set_shader_parameter("body_height", body_height)
+	mat.set_shader_parameter("sag", sag)
+	mat.set_shader_parameter("sway", sway)
+	mat.set_shader_parameter("wobble2_axis", wobble2_axis)
+	mat.set_shader_parameter("wobble2", wobble2)
 	mat.set_shader_parameter("ripple_origin", ripple_origins)
 	mat.set_shader_parameter("ripple_amp", ripple_amps)

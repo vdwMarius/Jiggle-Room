@@ -11,3 +11,5 @@ unlock_rule = ""
 procedural_shape = 1
 base_radius = 0.45
 collision = 0
+sway_amount = 1.25
+sag_amount = 0.09

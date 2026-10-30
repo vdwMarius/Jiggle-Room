@@ -26,13 +26,12 @@ func _ready() -> void:
 func enter(focus: Vector3) -> void:
 	active = true
 	get_tree().paused = true
-	camera.begin_orbit(focus)
+	camera.focus(focus, 1.6)
 
 
 func exit() -> void:
 	active = false
 	get_tree().paused = false
-	camera.end_orbit()
 
 
 func toggle_freeze() -> bool:
