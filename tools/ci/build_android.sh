@@ -8,12 +8,13 @@
 # Output: build/JiggleRoom.apk and build/logs/*.log
 set -euo pipefail
 
-GODOT_VERSION="${GODOT_VERSION:-4.3}"
+# 4.6.3 is the version the v1 APK was built and verified with.
+GODOT_VERSION="${GODOT_VERSION:-4.6.3}"
 GODOT_FLAVOR="${GODOT_FLAVOR:-stable}"
 TOOLS_DIR="${TOOLS_DIR:-$HOME/.jiggle-tools}"
 ANDROID_HOME="${ANDROID_HOME:-$TOOLS_DIR/android-sdk}"
-BUILD_TOOLS="34.0.0"
-PLATFORM="android-34"
+BUILD_TOOLS="${BUILD_TOOLS:-35.0.1}"
+PLATFORM="${PLATFORM:-android-35}"
 PRESET="Android APK"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -106,7 +107,8 @@ export/android/debug_keystore_pass = "android"
 EOF
 )
 # File name differs between Godot minor versions; write the common ones.
-for f in "editor_settings-4.tres" "editor_settings-${GODOT_VERSION}.tres"; do
+GODOT_MAJOR_MINOR="$(echo "$GODOT_VERSION" | cut -d. -f1-2)"
+for f in "editor_settings-4.tres" "editor_settings-${GODOT_MAJOR_MINOR}.tres"; do
   printf '%s\n' "$SETTINGS" > "$CONF/$f"
 done
 
@@ -133,6 +135,15 @@ done < <(find "$ROOT/scripts" -name '*.gd' | sort)
 
 log "Smoke run: start the game headless for ~10 s"
 "${GODOT[@]}" --quit-after 600 >"$LOGS/run.log" 2>&1 || true
+
+log "Functional smoke test: every room, every jelly, gestures, camera, modes"
+"${GODOT[@]}" res://tools/ci/smoke_test.tscn >"$LOGS/smoke.log" 2>&1 || true
+grep -E "^SMOKE" "$LOGS/smoke.log" | tail -40
+if ! grep -q "SMOKE OK" "$LOGS/smoke.log" || grep -Eq "$ERR_PATTERN" "$LOGS/smoke.log"; then
+  grep -En "$ERR_PATTERN|SMOKE FAIL" "$LOGS/smoke.log" | head -60
+  die "Functional smoke test failed (see build/logs/smoke.log)"
+fi
+cat "$LOGS/smoke.log" >>"$LOGS/run.log"
 
 if grep -Eq "$ERR_PATTERN" "$LOGS/import.log" "$LOGS/run.log"; then
   grep -En "$ERR_PATTERN" "$LOGS/import.log" "$LOGS/run.log" | head -60
